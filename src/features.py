@@ -94,6 +94,63 @@ def add_volume_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# New Indicators (Feature 18)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def add_atr(df: pd.DataFrame, window: int = 14) -> pd.DataFrame:
+    """Average True Range (Volatility)."""
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
+    prev_close = close.shift(1)
+
+    tr1 = high - low
+    tr2 = (high - prev_close).abs()
+    tr3 = (low - prev_close).abs()
+
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    df["ATR"] = tr.rolling(window=window).mean()
+    return df
+
+
+def add_obv(df: pd.DataFrame) -> pd.DataFrame:
+    """On-Balance Volume (Momentum)."""
+    # Calculate direction: 1 if up, -1 if down, 0 if flat
+    direction = np.sign(df["Close"].diff())
+    # Fill NaN (first row) with 0
+    direction = direction.fillna(0)
+    
+    # Volume flow = direction * volume
+    # Use cumsum to get OBV
+    df["OBV"] = (direction * df["Volume"]).cumsum()
+    return df
+
+
+def add_stochastic_oscillator(df: pd.DataFrame, window: int = 14) -> pd.DataFrame:
+    """Stochastic Oscillator (Momentum)."""
+    low_min = df["Low"].rolling(window=window).min()
+    high_max = df["High"].rolling(window=window).max()
+
+    # Fast Stochastic %K
+    df["Stoch_K"] = 100 * ((df["Close"] - low_min) / (high_max - low_min))
+    
+    # Slow Stochastic %D (3-day SMA of %K)
+    df["Stoch_D"] = df["Stoch_K"].rolling(window=3).mean()
+    return df
+
+
+def add_williams_r(df: pd.DataFrame, window: int = 14) -> pd.DataFrame:
+    """Williams %R (Momentum)."""
+    low_min = df["Low"].rolling(window=window).min()
+    high_max = df["High"].rolling(window=window).max()
+
+    # Williams %R is inverse of Stochastic Fast %K somewhat
+    # Formula: (High_max - Close) / (High_max - Low_min) * -100
+    df["Williams_R"] = -100 * ((high_max - df["Close"]) / (high_max - low_min))
+    return df
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Full Pipeline
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -104,7 +161,7 @@ def add_all_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     Parameters
     ----------
     df : pd.DataFrame
-        DataFrame with at least 'Close' and 'Volume' columns.
+        DataFrame with at least 'Close', 'High', 'Low', 'Volume' columns.
 
     Returns
     -------
@@ -112,14 +169,27 @@ def add_all_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
         Original DataFrame with indicator columns appended.
     """
     df = df.copy()
+    
+    # Trend
     df = add_sma(df)
     df = add_ema(df)
-    df = add_rsi(df)
     df = add_macd(df)
+    
+    # Momentum
+    df = add_rsi(df)
+    df = add_stochastic_oscillator(df)
+    df = add_williams_r(df)
+    df = add_obv(df)
+    
+    # Volatility
     df = add_bollinger_bands(df)
+    df = add_atr(df)
+    
+    # Other
     df = add_daily_returns(df)
     df = add_lag_features(df)
     df = add_volume_features(df)
+    
     return df
 
 
@@ -217,6 +287,13 @@ if __name__ == "__main__":
     enriched = add_all_technical_indicators(sample)
     print(f"Columns after feature engineering: {enriched.columns.tolist()}")
     print(f"\nShape: {enriched.shape}")
+
+    # Check for new columns
+    for col in ["ATR", "OBV", "Stoch_K", "Stoch_D", "Williams_R"]:
+        if col in enriched.columns:
+            print(f"✅ {col} added successfully")
+        else:
+            print(f"❌ {col} MISSING")
 
     X, y = prepare_features(enriched)
     print(f"\nFeature matrix shape: {X.shape}")

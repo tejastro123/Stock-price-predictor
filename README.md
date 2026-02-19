@@ -80,6 +80,8 @@ stock-price-predictor/
 
 ## 🚀 Getting Started
 
+### Installation & Setup
+
 ### Prerequisites
 
 - **Python** 3.9+ with pip
@@ -147,6 +149,8 @@ The notebook covers:
 8. Production Pipeline
 
 ## 🔌 API Endpoints
+
+> **Note**: Interactive API documentation is available at **<http://localhost:8000/docs>**
 
 ```bash
 | Method | Endpoint | Description |

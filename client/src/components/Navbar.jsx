@@ -21,9 +21,18 @@ export default function Navbar() {
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <a
+          href="http://localhost:8000/docs"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn btn--sm btn--secondary"
+          style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 6 }}
+        >
+          <FiActivity /> API Docs
+        </a>
         <ThemeToggle />
         <div className="navbar__badge">
-          <FiActivity size={12} style={{ marginRight: 4 }} />
+          <FiTrendingUp size={12} style={{ marginRight: 4 }} />
           Live System
         </div>
       </div>
