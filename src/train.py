@@ -4,10 +4,7 @@ train.py — Model Training Pipeline
 Trains multiple models and saves the best-performing model to disk.
 
 Regression models (price prediction):
-  • Linear Regression   • Decision Tree   • Random Forest
-
-Classification model (direction prediction):
-  • Logistic Regression (Up / Down)
+  • Decision Tree   • Random Forest   • XGBoost   • LightGBM
 
 Author : Student ML Engineer
 Project: Stock Price Prediction System
@@ -19,11 +16,12 @@ import numpy as np
 import pandas as pd
 import joblib
 
-from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, mean_absolute_error, accuracy_score
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
+from xgboost import XGBRegressor
+from lightgbm import LGBMRegressor
 
 from src.data_fetch import fetch_stock_data
 from src.features import (
@@ -81,7 +79,6 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
 def _get_regression_models() -> dict:
     """Return a dictionary of candidate regression models for price prediction."""
     return {
-        "LinearRegression": LinearRegression(),
         "DecisionTree": DecisionTreeRegressor(
             max_depth=10,
             min_samples_split=10,
@@ -95,46 +92,46 @@ def _get_regression_models() -> dict:
             random_state=RANDOM_SEED,
             n_jobs=-1,
         ),
+        "XGBoost": XGBRegressor(
+            n_estimators=300,
+            max_depth=6,
+            learning_rate=0.05,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=RANDOM_SEED,
+            n_jobs=-1,
+            verbosity=0,
+        ),
+        "LightGBM": LGBMRegressor(
+            n_estimators=300,
+            max_depth=10,
+            learning_rate=0.05,
+            num_leaves=31,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=RANDOM_SEED,
+            n_jobs=-1,
+            verbose=-1,
+        ),
     }
-
-
-def _get_direction_model() -> LogisticRegression:
-    """Return a Logistic Regression model for directional (up/down) prediction."""
-    return LogisticRegression(
-        max_iter=1000,
-        random_state=RANDOM_SEED,
-        class_weight="balanced",
-    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Hyperparameter Tuning (Random Forest)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def tune_random_forest(X_train: np.ndarray, y_train: np.ndarray) -> RandomForestRegressor:
+def _tune_model(name, base_model, param_distributions, X_train, y_train, n_iter=20):
     """
-    Tune Random Forest using TimeSeriesSplit + RandomizedSearchCV.
+    Tune a model using TimeSeriesSplit + RandomizedSearchCV.
 
-    Returns
-    -------
-    RandomForestRegressor
-        Best estimator from the search.
+    Returns the best estimator from the search.
     """
-    param_distributions = {
-        "n_estimators": [100, 200, 300, 500],
-        "max_depth": [5, 10, 15, 20, None],
-        "min_samples_split": [2, 5, 10],
-        "min_samples_leaf": [1, 2, 4],
-        "max_features": ["sqrt", "log2", 0.5, 0.8],
-    }
-
     tscv = TimeSeriesSplit(n_splits=5)
-    base_model = RandomForestRegressor(random_state=RANDOM_SEED, n_jobs=-1)
 
     search = RandomizedSearchCV(
         estimator=base_model,
         param_distributions=param_distributions,
-        n_iter=20,
+        n_iter=n_iter,
         cv=tscv,
         scoring="neg_root_mean_squared_error",
         random_state=RANDOM_SEED,
@@ -142,12 +139,65 @@ def tune_random_forest(X_train: np.ndarray, y_train: np.ndarray) -> RandomForest
         verbose=0,
     )
 
-    logger.info("Starting Random Forest hyperparameter tuning (20 iterations, 5-fold TS CV)...")
+    logger.info("Starting %s hyperparameter tuning (%d iterations, 5-fold TS CV)...", name, n_iter)
     search.fit(X_train, y_train)
-    logger.info("Best params: %s", search.best_params_)
-    logger.info("Best CV RMSE: %.4f", -search.best_score_)
+    logger.info("%s best params: %s", name, search.best_params_)
+    logger.info("%s best CV RMSE: %.4f", name, -search.best_score_)
 
     return search.best_estimator_
+
+
+def tune_random_forest(X_train: np.ndarray, y_train: np.ndarray) -> RandomForestRegressor:
+    """Tune Random Forest."""
+    return _tune_model(
+        "RandomForest",
+        RandomForestRegressor(random_state=RANDOM_SEED, n_jobs=-1),
+        {
+            "n_estimators": [100, 200, 300, 500],
+            "max_depth": [5, 10, 15, 20, None],
+            "min_samples_split": [2, 5, 10],
+            "min_samples_leaf": [1, 2, 4],
+            "max_features": ["sqrt", "log2", 0.5, 0.8],
+        },
+        X_train, y_train,
+    )
+
+
+def tune_xgboost(X_train: np.ndarray, y_train: np.ndarray) -> XGBRegressor:
+    """Tune XGBoost."""
+    return _tune_model(
+        "XGBoost",
+        XGBRegressor(random_state=RANDOM_SEED, n_jobs=-1, verbosity=0),
+        {
+            "n_estimators": [100, 200, 300, 500],
+            "max_depth": [3, 5, 6, 8, 10],
+            "learning_rate": [0.01, 0.03, 0.05, 0.1],
+            "subsample": [0.6, 0.7, 0.8, 0.9, 1.0],
+            "colsample_bytree": [0.6, 0.7, 0.8, 0.9, 1.0],
+            "reg_alpha": [0, 0.01, 0.1, 1],
+            "reg_lambda": [0.5, 1, 2, 5],
+        },
+        X_train, y_train,
+    )
+
+
+def tune_lightgbm(X_train: np.ndarray, y_train: np.ndarray) -> LGBMRegressor:
+    """Tune LightGBM."""
+    return _tune_model(
+        "LightGBM",
+        LGBMRegressor(random_state=RANDOM_SEED, n_jobs=-1, verbose=-1),
+        {
+            "n_estimators": [100, 200, 300, 500],
+            "max_depth": [5, 8, 10, 15, -1],
+            "learning_rate": [0.01, 0.03, 0.05, 0.1],
+            "num_leaves": [15, 31, 50, 80],
+            "subsample": [0.6, 0.7, 0.8, 0.9, 1.0],
+            "colsample_bytree": [0.6, 0.7, 0.8, 0.9, 1.0],
+            "reg_alpha": [0, 0.01, 0.1, 1],
+            "reg_lambda": [0.5, 1, 2, 5],
+        },
+        X_train, y_train,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -167,10 +217,9 @@ def train_model(
       2. Engineer features
       3. Split (time-based)
       4. Scale
-      5. Train & compare regression models (LR, DT, RF)
-      6. Train Logistic Regression for direction (up/down)
-      7. (Optionally) tune Random Forest
-      8. Save the best model + scaler + metadata
+      5. Train & compare regression models (DT, RF, XGBoost, LightGBM)
+      6. (Optionally) tune the best model
+      7. Save the best model + scaler + metadata
 
     Returns
     -------
@@ -215,46 +264,27 @@ def train_model(
             best_rmse = metrics["rmse"]
             best_model_name = name
 
-    # ── Step 6: Logistic Regression for Direction ─────────────────────────
-    # Create binary target: 1 = price went up, 0 = price went down
-    y_train_dir = (y_train.diff().dropna() > 0).astype(int)
-    y_test_dir = (y_test.diff().dropna() > 0).astype(int)
-    X_train_dir = X_train_scaled[1:]  # align with diff (drops first row)
-    X_test_dir = X_test_scaled[1:]
+    # ── Step 6: Tune the best model ───────────────────────────────────────
+    tuners = {
+        "RandomForest": tune_random_forest,
+        "XGBoost": tune_xgboost,
+        "LightGBM": tune_lightgbm,
+    }
 
-    try:
-        log_model = _get_direction_model()
-        log_model.fit(X_train_dir, y_train_dir)
-        dir_preds = log_model.predict(X_test_dir)
-        dir_accuracy = accuracy_score(y_test_dir, dir_preds) * 100
-
-        results["LogisticRegression_Direction"] = {
-            "rmse": None,
-            "mae": None,
-            "mape": None,
-            "directional_accuracy": round(dir_accuracy, 2),
-        }
-        logger.info("LogisticRegression (Direction) — Accuracy: %.2f%%", dir_accuracy)
-
-        # Save direction model separately
-        safe_ticker = ticker.upper().replace("/", "_")
-        joblib.dump(log_model, os.path.join(MODELS_DIR, f"{safe_ticker}_direction_model.pkl"))
-    except Exception as exc:
-        logger.warning("Logistic Regression direction model failed: %s", exc)
-
-    # ── Step 7: Tune (Random Forest) ──────────────────────────────────────
-    if tune and best_model_name == "RandomForest":
-        logger.info("Tuning Random Forest...")
-        tuned_model = tune_random_forest(X_train_scaled, y_train)
+    if tune and best_model_name in tuners:
+        tuner_fn = tuners[best_model_name]
+        logger.info("Tuning %s...", best_model_name)
+        tuned_model = tuner_fn(X_train_scaled, y_train)
         preds = tuned_model.predict(X_test_scaled)
         tuned_metrics = compute_metrics(y_test.values, preds)
-        results["RandomForest_Tuned"] = tuned_metrics
-        logger.info("Tuned RandomForest — RMSE: %.4f | MAE: %.4f",
-                     tuned_metrics["rmse"], tuned_metrics["mae"])
+        tuned_name = f"{best_model_name}_Tuned"
+        results[tuned_name] = tuned_metrics
+        logger.info("Tuned %s — RMSE: %.4f | MAE: %.4f",
+                     best_model_name, tuned_metrics["rmse"], tuned_metrics["mae"])
 
         if tuned_metrics["rmse"] < best_rmse:
-            best_model_name = "RandomForest_Tuned"
-            models["RandomForest_Tuned"] = tuned_model
+            best_model_name = tuned_name
+            models[tuned_name] = tuned_model
 
     # ── Step 8: Save ──────────────────────────────────────────────────────
     best_model = models[best_model_name]
@@ -274,11 +304,25 @@ def train_model(
 
     logger.info("Saved best model (%s) to %s", best_model_name, model_path)
 
+    # ── Extract feature importances ───────────────────────────────────────
+    feature_importance = []
+    if hasattr(best_model, "feature_importances_"):
+        importances = best_model.feature_importances_
+        sorted_idx = np.argsort(importances)[::-1]
+        for i in sorted_idx[:15]:  # top 15 features
+            feature_importance.append({
+                "feature": feature_names[i],
+                "importance": round(float(importances[i]), 4),
+            })
+        logger.info("Top 3 features: %s",
+                     ", ".join(f["feature"] for f in feature_importance[:3]))
+
     return {
         "ticker": ticker,
         "best_model": best_model_name,
         "all_results": results,
         "best_metrics": results[best_model_name],
+        "feature_importance": feature_importance,
     }
 
 

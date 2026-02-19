@@ -62,10 +62,10 @@ stock-price-predictor/
 ```bash
 | Model | Type | Purpose |
 |-------|------|---------|
-| **Linear Regression** | Regression | Baseline price prediction |
 | **Decision Tree** | Regression | Non-linear price prediction |
-| **Random Forest** | Regression | Ensemble price prediction (typically best) |
-| **Logistic Regression** | Classification | Directional (up/down) prediction |
+| **Random Forest** | Regression | Ensemble price prediction |
+| **XGBoost** | Regression | Gradient boosted price prediction |
+| **LightGBM** | Regression | Fast gradient boosted prediction (typically best) |
 ```
 
 ## 📊 Technical Indicators

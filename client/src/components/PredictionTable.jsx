@@ -31,6 +31,7 @@ export default function PredictionTable({ predictions, ticker }) {
               <th>Day</th>
               <th>Date</th>
               <th>Predicted Close</th>
+              <th>95% CI Range</th>
               <th>Change</th>
             </tr>
           </thead>
@@ -50,6 +51,18 @@ export default function PredictionTable({ predictions, ticker }) {
                   <td className="day-cell">Day {idx + 1}</td>
                   <td className="date-cell">{pred.date}</td>
                   <td className="price-cell">${pred.close.toFixed(2)}</td>
+                  <td
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12,
+                      color: "#a78bfa",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {pred.lower != null && pred.upper != null
+                      ? `$${pred.lower.toFixed(2)} – $${pred.upper.toFixed(2)}`
+                      : "—"}
+                  </td>
                   <td
                     style={{
                       color: idx === 0 ? "var(--text-muted)" : isUp ? "#10b981" : "#ef4444",

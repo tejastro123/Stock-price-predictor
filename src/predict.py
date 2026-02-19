@@ -52,6 +52,21 @@ def _load_artifacts(ticker: str) -> tuple:
     return model, scaler, meta
 
 
+def _compute_volatility(df: pd.DataFrame, window: int = 60) -> float:
+    """
+    Compute annualised daily returns volatility from recent closing prices.
+
+    Uses the last `window` trading days of data.  Returns the daily
+    standard deviation of log-returns (NOT annualised), so it can be
+    plugged straight into  σ * √t  confidence bands.
+    """
+    closes = df["Close"].dropna().tail(window)
+    if len(closes) < 10:
+        return 0.02  # fallback: ~2 % daily vol
+    log_returns = np.log(closes / closes.shift(1)).dropna()
+    return float(log_returns.std())
+
+
 def predict_stock(ticker: str, days_ahead: int = 5) -> dict:
     """
     Predict future stock prices for the next N trading days.
@@ -61,6 +76,10 @@ def predict_stock(ticker: str, days_ahead: int = 5) -> dict:
       2. Shift the data forward — the predicted Close becomes the new
          'Close' value, and all indicators are recomputed.
       3. Repeat for each day in the forecast horizon.
+
+    Confidence intervals are computed using historical volatility:
+      band = price ± z * σ * √t
+    where z=1.96 (95 % CI), σ = daily log-return std, t = day number.
 
     Parameters
     ----------
@@ -76,8 +95,8 @@ def predict_stock(ticker: str, days_ahead: int = 5) -> dict:
             "ticker": str,
             "model_used": str,
             "metrics": dict,
-            "history": [{"date": str, "close": float}, ...],   # last 60 days
-            "predictions": [{"date": str, "close": float}, ...]
+            "history":      [{"date", "close"}, ...],
+            "predictions":  [{"date", "close", "upper", "lower"}, ...]
         }
     """
     # ── Load artifacts ────────────────────────────────────────────────────
@@ -90,10 +109,21 @@ def predict_stock(ticker: str, days_ahead: int = 5) -> dict:
     df_enriched = add_all_technical_indicators(df)
     df_enriched = df_enriched.dropna()
 
+    # ── Historical volatility for confidence bands ────────────────────────
+    daily_vol = _compute_volatility(df)
+    z_score = 1.96  # 95 % confidence interval
+
     # ── Prepare history (last 60 trading days) ────────────────────────────
     history_df = df.tail(60)
     history = [
-        {"date": d.strftime("%Y-%m-%d"), "close": round(float(row["Close"]), 2)}
+        {
+            "date": d.strftime("%Y-%m-%d"),
+            "open": round(float(row["Open"]), 2),
+            "high": round(float(row["High"]), 2),
+            "low": round(float(row["Low"]), 2),
+            "close": round(float(row["Close"]), 2),
+            "volume": int(row["Volume"]),
+        }
         for d, row in history_df.iterrows()
     ]
 
@@ -114,6 +144,11 @@ def predict_stock(ticker: str, days_ahead: int = 5) -> dict:
         # Predict
         pred_price = float(model.predict(last_scaled)[0])
 
+        # Confidence band: widens with sqrt(day)
+        band = z_score * daily_vol * np.sqrt(day) * pred_price
+        upper = round(pred_price + band, 2)
+        lower = round(pred_price - band, 2)
+
         # Compute next business date
         next_date = last_date + timedelta(days=1)
         while next_date.weekday() >= 5:  # skip weekends
@@ -122,15 +157,22 @@ def predict_stock(ticker: str, days_ahead: int = 5) -> dict:
         predictions.append({
             "date": next_date.strftime("%Y-%m-%d"),
             "close": round(pred_price, 2),
+            "upper": upper,
+            "lower": lower,
         })
 
         # Append the predicted row to working_df for next iteration
+        # Use historical volatility for realistic OHLC estimates
+        high_est = pred_price * (1 + daily_vol)    # +1σ intraday high
+        low_est  = pred_price * (1 - daily_vol)    # -1σ intraday low
+        open_est = pred_price * (1 + daily_vol * 0.3 * np.random.choice([-1, 1]))
+
         new_row = pd.DataFrame({
-            "Open": [pred_price],
-            "High": [pred_price * 1.005],   # slight estimate
-            "Low": [pred_price * 0.995],
+            "Open": [open_est],
+            "High": [high_est],
+            "Low": [low_est],
             "Close": [pred_price],
-            "Volume": [working_df["Volume"].tail(5).mean()],
+            "Volume": [working_df["Volume"].tail(20).mean()],
         }, index=[next_date])
 
         if "Adj Close" in working_df.columns:
@@ -139,7 +181,7 @@ def predict_stock(ticker: str, days_ahead: int = 5) -> dict:
         working_df = pd.concat([working_df, new_row])
         last_date = next_date
 
-    logger.info("Generated %d-day forecast for %s", days_ahead, ticker)
+    logger.info("Generated %d-day forecast for %s (daily_vol=%.4f)", days_ahead, ticker, daily_vol)
 
     return {
         "ticker": ticker.upper(),

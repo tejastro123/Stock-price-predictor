@@ -2,7 +2,7 @@
  * App.jsx — Main Application Component
  * =======================================
  * Orchestrates state management and renders all child components.
- * Communicates with the Express backend via Axios.
+ * Supports Single prediction and Compare modes.
  *
  * Author : Student ML Engineer
  * Project: Stock Price Prediction System
@@ -16,12 +16,18 @@ import TickerInput from "./components/TickerInput";
 import MetricsDisplay from "./components/MetricsDisplay";
 import StockChart from "./components/StockChart";
 import PredictionTable from "./components/PredictionTable";
+import ModelComparison from "./components/ModelComparison";
+import FeatureImportance from "./components/FeatureImportance";
+import StockInfo from "./components/StockInfo";
+import ProgressStepper from "./components/ProgressStepper";
+import CompareMode from "./components/CompareMode";
 
-// API base URL — Vite proxy handles /api prefix in dev
-const API_BASE = "/api";
+// API base URL — configurable via env, defaults to /api (Vite proxy handles it in dev)
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
 
 export default function App() {
   // ── State ────────────────────────────────────────────────────────────
+  const [appMode, setAppMode] = useState("single"); // "single" | "compare"
   const [loading, setLoading] = useState(false);
   const [training, setTraining] = useState(false);
   const [error, setError] = useState(null);
@@ -33,7 +39,22 @@ export default function App() {
   // Training result
   const [trainResult, setTrainResult] = useState(null);
 
+  // Stock info
+  const [stockInfo, setStockInfo] = useState(null);
+
   // ── Handlers ─────────────────────────────────────────────────────────
+
+  /**
+   * Fetch stock info (non-blocking)
+   */
+  const fetchStockInfo = async (ticker) => {
+    try {
+      const response = await axios.get(`${API_BASE}/info/${ticker.toUpperCase()}`);
+      setStockInfo(response.data);
+    } catch (err) {
+      console.warn("Stock info fetch failed (non-critical):", err.message);
+    }
+  };
 
   /**
    * Handle prediction request
@@ -42,6 +63,9 @@ export default function App() {
     setLoading(true);
     setError(null);
     setStatusMsg("Generating predictions...");
+
+    // Fetch stock info in parallel (non-blocking)
+    fetchStockInfo(ticker);
 
     try {
       const response = await axios.post(`${API_BASE}/predict`, {
@@ -70,6 +94,9 @@ export default function App() {
     setTraining(true);
     setError(null);
     setStatusMsg(`Training model for ${ticker}... This may take 1-2 minutes.`);
+
+    // Fetch stock info in parallel
+    fetchStockInfo(ticker);
 
     try {
       const response = await axios.post(`${API_BASE}/train`, {
@@ -100,105 +127,159 @@ export default function App() {
     <div className="app">
       <Navbar />
 
-      {/* Input Section */}
-      <TickerInput
-        onPredict={handlePredict}
-        onTrain={handleTrain}
-        loading={loading}
-        training={training}
-      />
+      {/* Mode Tabs */}
+      <div className="app-mode-tabs">
+        <button
+          className={`app-mode-tab ${appMode === "single" ? "app-mode-tab--active" : ""}`}
+          onClick={() => setAppMode("single")}
+        >
+          📊 Single Stock
+        </button>
+        <button
+          className={`app-mode-tab ${appMode === "compare" ? "app-mode-tab--active" : ""}`}
+          onClick={() => setAppMode("compare")}
+        >
+          🔀 Compare Stocks
+        </button>
+      </div>
 
-      {/* Status Messages */}
-      {statusMsg && (
-        <div className="status status--loading fade-in" style={{ margin: "16px 0" }}>
-          {training || loading ? <div className="spinner" /> : <div className="pulse-dot" />}
-          {statusMsg}
-        </div>
-      )}
+      {/* ── SINGLE MODE ─────────────────────────────────────────── */}
+      {appMode === "single" && (
+        <>
+          <TickerInput
+            onPredict={handlePredict}
+            onTrain={handleTrain}
+            loading={loading}
+            training={training}
+          />
 
-      {error && (
-        <div className="status status--error fade-in" style={{ margin: "16px 0" }}>
-          ⚠️ {error}
-        </div>
-      )}
+          {/* Progress Stepper */}
+          {(training || loading) && (
+            <div style={{ marginTop: 16 }}>
+              <ProgressStepper
+                mode={training ? "training" : "prediction"}
+                active={training || loading}
+              />
+            </div>
+          )}
 
-      {/* Training Results */}
-      {trainResult && !result && (
-        <div className="card fade-in" style={{ margin: "16px 0" }}>
-          <div className="card__header">
-            <div className="card__icon card__icon--green">🏆</div>
-            <h2 className="card__title">Training Complete</h2>
-          </div>
-          <p style={{ color: "var(--text-secondary)", marginBottom: 12, fontSize: 14 }}>
-            Best model: <strong style={{ color: "var(--accent-3)" }}>{trainResult.best_model}</strong>
-          </p>
-          <div className="metrics-grid">
-            {Object.entries(trainResult.all_results).map(([name, metrics]) => (
-              <div key={name} className="metric-card">
-                <div className="metric-card__label">{name}</div>
-                <div className="metric-card__value">
-                  {metrics.rmse != null ? metrics.rmse.toFixed(2) : "—"}
+          {/* Status Messages */}
+          {statusMsg && !training && !loading && (
+            <div className="status status--loading fade-in" style={{ margin: "16px 0" }}>
+              <div className="pulse-dot" />
+              {statusMsg}
+            </div>
+          )}
+
+          {error && (
+            <div className="status status--error fade-in" style={{ margin: "16px 0" }}>
+              ⚠️ {error}
+            </div>
+          )}
+
+          {/* Stock Info Card */}
+          {stockInfo && (result || trainResult) && (
+            <div style={{ marginTop: 24 }}>
+              <StockInfo info={stockInfo} />
+            </div>
+          )}
+
+          {/* Training Results */}
+          {trainResult && (
+            <>
+              <div style={{ marginTop: 24 }}>
+                <ModelComparison
+                  allResults={trainResult.all_results}
+                  bestModel={trainResult.best_model}
+                />
+              </div>
+              {trainResult.feature_importance && trainResult.feature_importance.length > 0 && (
+                <div style={{ marginTop: 24 }}>
+                  <FeatureImportance
+                    features={trainResult.feature_importance}
+                    modelName={trainResult.best_model}
+                  />
                 </div>
-                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
-                  {metrics.rmse != null ? "RMSE" : `Dir: ${metrics.directional_accuracy}%`}
+              )}
+            </>
+          )}
+
+          {/* Prediction Results */}
+          {result && (
+            <div className="mobile-card-scroll">
+              <div className="mobile-card-scroll__inner">
+                {/* Metrics */}
+                <div className="mobile-card-scroll__item" style={{ marginTop: 24 }}>
+                  <MetricsDisplay
+                    metrics={result.metrics}
+                    modelName={result.model_used}
+                  />
+                </div>
+
+                {/* Chart */}
+                <div className="mobile-card-scroll__item" style={{ marginTop: 24 }}>
+                  <StockChart
+                    history={result.history}
+                    predictions={result.predictions}
+                    ticker={result.ticker}
+                  />
+                </div>
+
+                {/* Prediction Table */}
+                <div className="mobile-card-scroll__item" style={{ marginTop: 24 }}>
+                  <PredictionTable
+                    predictions={result.predictions}
+                    ticker={result.ticker}
+                  />
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            </div>
+          )}
 
-      {/* Prediction Results */}
-      {result && (
-        <>
-          {/* Metrics */}
-          <div style={{ marginTop: 24 }}>
-            <MetricsDisplay
-              metrics={result.metrics}
-              modelName={result.model_used}
-            />
-          </div>
-
-          {/* Chart */}
-          <div style={{ marginTop: 24 }}>
-            <StockChart
-              history={result.history}
-              predictions={result.predictions}
-              ticker={result.ticker}
-            />
-          </div>
-
-          {/* Prediction Table */}
-          <div style={{ marginTop: 24 }}>
-            <PredictionTable
-              predictions={result.predictions}
-              ticker={result.ticker}
-            />
-          </div>
+          {/* Hero landing when no results */}
+          {!result && !trainResult && !loading && !training && (
+            <div className="hero fade-in" style={{ marginTop: 24 }}>
+              <div className="hero__icon">🚀</div>
+              <h1 className="hero__title">
+                AI-Powered Stock<br />Price Predictions
+              </h1>
+              <p className="hero__subtitle">
+                Train machine learning models on historical data and generate
+                multi-day price forecasts with confidence intervals.
+                Powered by XGBoost, LightGBM, and Random Forest.
+              </p>
+              <div className="hero__features">
+                <div className="hero__feature">
+                  <span className="hero__feature-icon">📈</span>
+                  95% Confidence Bands
+                </div>
+                <div className="hero__feature">
+                  <span className="hero__feature-icon">🤖</span>
+                  4 ML Models Compared
+                </div>
+                <div className="hero__feature">
+                  <span className="hero__feature-icon">⚡</span>
+                  Up to 30-Day Forecast
+                </div>
+                <div className="hero__feature">
+                  <span className="hero__feature-icon">🔍</span>
+                  Feature Importance
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
 
-      {/* Empty state when no results */}
-      {!result && !trainResult && !loading && !training && (
-        <div className="card fade-in" style={{ marginTop: 24 }}>
-          <div className="empty-state">
-            <div className="empty-state__icon">🚀</div>
-            <div className="empty-state__title">Ready to Predict</div>
-            <div className="empty-state__text">
-              Enter a stock ticker symbol (e.g., AAPL, GOOGL, MSFT) and click
-              <strong> Train Model</strong> first, then <strong>Predict</strong> to
-              see AI-powered price forecasts.
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── COMPARE MODE ────────────────────────────────────────── */}
+      {appMode === "compare" && <CompareMode />}
 
       {/* Footer */}
       <footer className="footer">
         Stock Price Prediction System — Built with ML &amp; MERN Stack
         <br />
         <span style={{ fontSize: 11 }}>
-          Models: Linear Regression · Decision Tree · Random Forest · Logistic Regression
+          Models: Decision Tree · Random Forest · XGBoost · LightGBM
         </span>
       </footer>
     </div>

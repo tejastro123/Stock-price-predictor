@@ -1,11 +1,12 @@
 /**
  * Navbar.jsx — Application Header
  * =================================
- * Premium navigation bar with branding and status indicator.
+ * Premium navigation bar with branding, status indicator, and theme toggle.
  */
 
 import React from "react";
 import { FiActivity, FiTrendingUp } from "react-icons/fi";
+import ThemeToggle from "./ThemeToggle";
 
 export default function Navbar() {
   return (
@@ -19,9 +20,12 @@ export default function Navbar() {
           <div className="navbar__subtitle">ML-Powered Stock Price Prediction</div>
         </div>
       </div>
-      <div className="navbar__badge">
-        <FiActivity size={12} style={{ marginRight: 4 }} />
-        Live System
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <ThemeToggle />
+        <div className="navbar__badge">
+          <FiActivity size={12} style={{ marginRight: 4 }} />
+          Live System
+        </div>
       </div>
     </nav>
   );

@@ -86,7 +86,7 @@ def fetch_stock_data(
                 "Downloading %s data (attempt %d/%d)...", ticker, attempt, MAX_RETRIES
             )
             stock = yf.Ticker(ticker)
-            df = stock.history(period=period, auto_adjust=False)
+            df = stock.history(period=period, auto_adjust=False, timeout=30)
 
             if df.empty:
                 raise ValueError(f"No data returned for ticker '{ticker}'.")

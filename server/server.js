@@ -12,6 +12,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
+const rateLimit = require("express-rate-limit");
 
 const predictRoutes = require("./routes/predict");
 
@@ -30,6 +31,27 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// ── Rate Limiting ─────────────────────────────────────────────────────────
+// Global: 100 requests per 15-minute window per IP
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests. Please try again later." },
+});
+app.use(globalLimiter);
+
+// Strict limiter for training endpoint (expensive operation)
+const trainLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Training rate limit exceeded. Max 5 training requests per 15 minutes." },
+});
+app.use("/api/train", trainLimiter);
 
 // Request logger
 app.use((req, _res, next) => {
@@ -75,3 +97,4 @@ connectDB().then(() => {
     console.log(`   Health:     http://localhost:${PORT}/api/health\n`);
   });
 });
+

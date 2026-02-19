@@ -3,24 +3,71 @@
  * ============================================
  * Input form for ticker symbol, forecast days, and action buttons.
  * Handles both training and prediction requests.
+ * Includes client-side ticker validation (format + existence check).
  */
 
 import React, { useState } from "react";
-import { FiSearch, FiCpu, FiZap } from "react-icons/fi";
+import axios from "axios";
+import { FiSearch, FiCpu, FiZap, FiAlertTriangle } from "react-icons/fi";
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
+const TICKER_REGEX = /^[A-Z]{1,5}$/;
 
 export default function TickerInput({ onPredict, onTrain, loading, training }) {
   const [ticker, setTicker] = useState("AAPL");
   const [days, setDays] = useState(5);
+  const [tickerError, setTickerError] = useState(null);
+  const [validating, setValidating] = useState(false);
 
-  const handlePredict = (e) => {
+  /**
+   * Validate ticker format and existence via /api/info endpoint.
+   * Returns true if valid, false otherwise (and sets tickerError).
+   */
+  const validateTicker = async (symbol) => {
+    const clean = symbol.trim().toUpperCase();
+
+    // Format check
+    if (!clean) {
+      setTickerError("Please enter a ticker symbol.");
+      return false;
+    }
+    if (!TICKER_REGEX.test(clean)) {
+      setTickerError("Ticker must be 1–5 letters (e.g. AAPL, TSLA).");
+      return false;
+    }
+
+    // Existence check via API
+    setValidating(true);
+    try {
+      await axios.get(`${API_BASE}/info/${clean}`, { timeout: 10000 });
+      setTickerError(null);
+      return true;
+    } catch (err) {
+      const status = err.response?.status;
+      if (status === 404 || status === 400) {
+        setTickerError(`Ticker "${clean}" not found. Check the symbol and try again.`);
+      } else {
+        // Network or server error — allow the user to proceed (don't block)
+        setTickerError(null);
+        return true;
+      }
+      return false;
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const handlePredict = async (e) => {
     e.preventDefault();
-    if (ticker.trim()) {
+    const isValid = await validateTicker(ticker);
+    if (isValid) {
       onPredict(ticker.trim().toUpperCase(), days);
     }
   };
 
-  const handleTrain = () => {
-    if (ticker.trim()) {
+  const handleTrain = async () => {
+    const isValid = await validateTicker(ticker);
+    if (isValid) {
       onTrain(ticker.trim().toUpperCase());
     }
   };
@@ -42,10 +89,14 @@ export default function TickerInput({ onPredict, onTrain, loading, training }) {
               id="ticker-input"
               type="text"
               value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase())}
+              onChange={(e) => {
+                setTicker(e.target.value.toUpperCase());
+                setTickerError(null); // Clear error on change
+              }}
               placeholder="e.g. AAPL, GOOGL, TSLA"
-              maxLength={10}
+              maxLength={5}
               required
+              style={tickerError ? { borderColor: "#ef4444" } : {}}
             />
           </div>
 
@@ -69,24 +120,45 @@ export default function TickerInput({ onPredict, onTrain, loading, training }) {
               type="button"
               className={`btn btn--secondary ${training ? "btn--loading" : ""}`}
               onClick={handleTrain}
-              disabled={loading || training}
+              disabled={loading || training || validating}
               title="Train model for this ticker first"
             >
               <FiCpu />
-              {training ? "Training..." : "Train Model"}
+              {training ? "Training..." : validating ? "Validating..." : "Train Model"}
             </button>
 
             <button
               type="submit"
               className={`btn btn--primary ${loading ? "btn--loading" : ""}`}
-              disabled={loading || training}
+              disabled={loading || training || validating}
             >
               <FiZap />
-              {loading ? "Predicting..." : "Predict"}
+              {loading ? "Predicting..." : validating ? "Validating..." : "Predict"}
             </button>
           </div>
         </div>
       </form>
+
+      {/* Ticker validation error */}
+      {tickerError && (
+        <div
+          style={{
+            marginTop: 10,
+            padding: "8px 12px",
+            borderRadius: 8,
+            background: "rgba(239, 68, 68, 0.1)",
+            border: "1px solid rgba(239, 68, 68, 0.3)",
+            color: "#ef4444",
+            fontSize: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <FiAlertTriangle />
+          {tickerError}
+        </div>
+      )}
 
       <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>
         💡 First time? Click <strong>Train Model</strong> to build the ML model, then <strong>Predict</strong>.
@@ -94,3 +166,4 @@ export default function TickerInput({ onPredict, onTrain, loading, training }) {
     </div>
   );
 }
+
